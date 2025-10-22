@@ -5,7 +5,10 @@ const cors = require('cors')
 app.use(cors())
 require('dotenv').config();
 const pool = require('./app/config/database');
+
+
 const authRoutes = require('./app/routes/auth.route');
+const testRunRoutes = require('./app/routes/testRun.route');
 
 
 //Middleware
@@ -14,6 +17,7 @@ app.use(express.urlencoded({ extended: true }));
 
 //Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/testruns', testRunRoutes);
 
 app.get('/', (req, res)=>{
     res.send(`App running on port${PORT}`);
