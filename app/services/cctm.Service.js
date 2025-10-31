@@ -13,7 +13,7 @@ async function generateCCTMTestCases(xmlFile, options = {}){
     //2. build classification tree
     const initialTree = await buildClassificationTree(variable);
     //3. merge classification trees
-    const mergedTree = await mergeClassificationTrees(initialTree);
+    const mergedTree = initialTree;
     //4. creat ECP partitions using exiting ECP unils
     let partitions = [];
     if(typeof createEcpPartitions === 'function'){
