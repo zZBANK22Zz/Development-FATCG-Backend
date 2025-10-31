@@ -12,6 +12,7 @@ const testRunRoutes = require('./app/routes/testRun.route');
 const diagramRoutes = require('./app/routes/diagram.route');
 const crossProductRoutes = require('./app/routes/crossProduct.route');
 const cctmRoutes = require('./app/routes/cctm.route');
+const cctmTeststoreRoutes = require('./app/routes/cctm.teststore.route');
 //Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -22,6 +23,7 @@ app.use('/api/testruns', testRunRoutes);
 app.use('/api/diagrams', diagramRoutes);
 app.use('/api/crossproduct', crossProductRoutes);
 app.use('/api/cctm', cctmRoutes);
+app.use('/api/cctm', cctmTeststoreRoutes);
 app.get('/', (req, res)=>{
     res.send(`App running on port${PORT}`);
 });
