@@ -114,7 +114,9 @@ function mergeOverlappingRanges(ranges) {
       }
   
       const base = map.get(v.name);
-      if (base.type === 'number' && v.type === 'number') {
+      // Check if both are numeric types (number, float, percentage)
+      const isNumeric = (type) => ['number', 'float', 'percentage'].includes(type);
+      if (isNumeric(base.type) && isNumeric(v.type)) {
         base.terminalClasses = mergeNumericTerminalClasses(base.terminalClasses, v.terminalClasses);
       } else {
         // union labels for enums/strings

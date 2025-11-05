@@ -24,3 +24,12 @@ Thumbs.db
 # Build files (ถ้ามี)
 dist/
 build/
+
+# ignore pdf files
+*.pdf
+
+# ingnore xml files
+*.xml
+
+# ignore uploads folder
+uploads/

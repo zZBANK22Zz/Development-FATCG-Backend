@@ -34,7 +34,12 @@ function generateTestCases(partitions, options = {}) {
       const combo = arrays.map(arr => arr[Math.floor(Math.random() * arr.length)]);
       const data = {};
       combo.forEach(item => { data[item.variable.name] = item.sample; });
-      out.push({ id: `TC-${i+1}`, data, meta: combo.map(c => c.tc.id) });
+      
+      // Determine type: Invalid if any terminal class in the combination is invalid
+      const hasInvalid = combo.some(item => item.tc && item.tc.valid === false);
+      const type = hasInvalid ? 'Invalid' : 'Valid';
+      
+      out.push({ id: `TC-${i+1}`, type, data, meta: combo.map(c => c.tc.id) });
     }
     return out;
   }
@@ -43,7 +48,12 @@ function generateTestCases(partitions, options = {}) {
   const tcs = raw.map((combo, idx) => {
     const data = {};
     combo.forEach(item => { data[item.variable.name] = item.sample; });
-    return { id: `TC-${idx+1}`, data, meta: combo.map(c => c.tc.id) };
+    
+    // Determine type: Invalid if any terminal class in the combination is invalid
+    const hasInvalid = combo.some(item => item.tc && item.tc.valid === false);
+    const type = hasInvalid ? 'Invalid' : 'Valid';
+    
+    return { id: `TC-${idx+1}`, type, data, meta: combo.map(c => c.tc.id) };
   });
 
   // dedupe by canonical JSON

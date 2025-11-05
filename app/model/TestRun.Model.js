@@ -243,6 +243,62 @@ const TestRunModel = {
     const query = `DELETE FROM test_runs WHERE id = $1 RETURNING id`;
     const result = await pool.query(query, [testRunId]);
     return result.rows[0];
+  },
+
+  // Save CCTM classification tree structure
+  saveCctmTreeStructure: async (userId, treeStructure) => {
+    // ใช้ state_tree_nodes column เพื่อเก็บ tree structure ชั่วคราว
+    // หรืออาจจะเพิ่ม column ใหม่ในอนาคต
+    const query = `
+      INSERT INTO test_runs (
+        user_id,
+        data_dictionary_filename,
+        state_tree_nodes,
+        ecp_csv_data,
+        combined_csv_data
+      ) VALUES ($1, $2, $3, '', '')
+      RETURNING id, created_at
+    `;
+    const result = await pool.query(query, [
+      userId,
+      'cctm-tree-structure',
+      JSON.stringify(treeStructure)
+    ]);
+    return result.rows[0];
+  },
+
+  // Get latest CCTM tree structure for user
+  getLatestCctmTreeStructure: async (userId) => {
+    const query = `
+      SELECT state_tree_nodes, id, created_at
+      FROM test_runs
+      WHERE user_id = $1 
+        AND data_dictionary_filename = 'cctm-tree-structure'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    const result = await pool.query(query, [userId]);
+    if (result.rows.length === 0) {
+      return null;
+    }
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      treeStructure: row.state_tree_nodes ? JSON.parse(row.state_tree_nodes) : null
+    };
+  },
+
+  // Update existing test run with CCTM tree structure
+  updateCctmTreeStructure: async (testRunId, treeStructure) => {
+    const query = `
+      UPDATE test_runs
+      SET state_tree_nodes = $1
+      WHERE id = $2
+      RETURNING id
+    `;
+    const result = await pool.query(query, [JSON.stringify(treeStructure), testRunId]);
+    return result.rows[0];
   }
 };
 
