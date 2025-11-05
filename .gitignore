@@ -33,3 +33,6 @@ build/
 
 # ignore uploads folder
 uploads/
+
+# ignore sample folders
+samples/
