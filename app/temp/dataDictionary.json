@@ -1,30 +1,77 @@
 {
   "classifications": [
     {
-      "name": "GFR",
+      "name": "Sex",
+      "classes": [
+        {
+          "name": "Male",
+          "type": "valid"
+        },
+        {
+          "name": "Female",
+          "type": "valid"
+        },
+        {
+          "name": "N/A",
+          "type": "invalid"
+        }
+      ]
+    },
+    {
+      "name": "Age",
       "classes": [
         {
           "name": "<0",
           "type": "invalid"
         },
         {
-          "name": "0-14",
+          "name": "1-18",
           "type": "valid"
         },
         {
-          "name": "15-29",
+          "name": "19-120",
           "type": "valid"
         },
         {
-          "name": "30-59",
+          "name": ">120",
+          "type": "invalid"
+        }
+      ]
+    },
+    {
+      "name": "Height",
+      "classes": [
+        {
+          "name": "<0",
+          "type": "invalid"
+        },
+        {
+          "name": "0-300",
           "type": "valid"
         },
         {
-          "name": "60-89",
+          "name": ">300",
+          "type": "invalid"
+        }
+      ]
+    },
+    {
+      "name": "SCr",
+      "classes": [
+        {
+          "name": "<0",
+          "type": "invalid"
+        },
+        {
+          "name": "0-0.9",
           "type": "valid"
         },
         {
-          "name": ">=90",
+          "name": "1.0-10.0",
+          "type": "valid"
+        },
+        {
+          "name": ">10",
           "type": "invalid"
         }
       ]
