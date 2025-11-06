@@ -1,0 +1,33 @@
+{
+  "classifications": [
+    {
+      "name": "GFR",
+      "classes": [
+        {
+          "name": "<0",
+          "type": "invalid"
+        },
+        {
+          "name": "0-14",
+          "type": "valid"
+        },
+        {
+          "name": "15-29",
+          "type": "valid"
+        },
+        {
+          "name": "30-59",
+          "type": "valid"
+        },
+        {
+          "name": "60-89",
+          "type": "valid"
+        },
+        {
+          "name": ">=90",
+          "type": "invalid"
+        }
+      ]
+    }
+  ]
+}

@@ -1,36 +1,58 @@
-const generateCCTMTestCases = (tree) => {
-    const source = tree?.root ? tree : tree?.classificationTree ? tree.classificationTree : tree;
+// services/cctmService.js
+const { parseXMLFile } = require('../utils/xmlParser');
+const { convertTreeToDataDictionary } = require('../utils/ecp/convertTreeToDataDictionary');
+const { generateValidCrossProductCasesFromJson, generateInvalidEcpCasesFromJson } = require('../utils/ecp/ecpCctmAdapter');
+const { stringify } = require('csv-stringify/sync');
 
-    const root = source?.root;
-    const validCases = [];
-    const invalidCases = [];
+async function generateCCTMTestCases(xmlFilePath) {
+  // Step 1: Parse XML → Object tree
+  const tree = await parseXMLFile(xmlFilePath);
 
-    if (!root) {
-      return { validCases, invalidCases };
-    }
+  // Step 2: Convert Tree → Data Dictionary JSON (includes type info)
+  const dataDictionaryPath = await convertTreeToDataDictionary(tree);
 
-    const toArray = (maybeArr) => Array.isArray(maybeArr) ? maybeArr : (maybeArr ? [maybeArr] : []);
-    const getName = (node) => node?.$?.name || node?.name || '';
-    const getType = (node) => node?.$?.type || node?.type || '';
+  // Step 3: Use crossProduct adapter to generate ECP-based test cases
+  const validCases = await generateValidCrossProductCasesFromJson(dataDictionaryPath);
+  const invalidCases = await generateInvalidEcpCasesFromJson(dataDictionaryPath);
 
-    const classifications = toArray(root.classification);
-    classifications.forEach((classificationNode) => {
-      const classificationName = getName(classificationNode);
-      const classes = toArray(classificationNode.class);
-      classes.forEach((classNode) => {
-        const className = getName(classNode);
-        const classType = getType(classNode);
-        const testCase = { classification: classificationName, node: className };
-        if (classType === 'valid') {
-          validCases.push(testCase);
-        } else if (classType === 'invalid') {
-          invalidCases.push(testCase);
-        }
-      });
-    });
+  // Step 4: Format test cases with IDs
+  const formattedValidCases = validCases.map((tc, idx) => ({
+    id: tc.testCaseID,
+    type: tc.type,
+    inputs: tc.inputs,
+  }));
 
-    return { validCases, invalidCases };
+  // Renumber invalid cases to continue after valid cases
+  const startIdx = validCases.length + 1;
+  const formattedInvalidCases = invalidCases.map((tc, idx) => ({
+    id: `TC${String(startIdx + idx).padStart(3, '0')}`,
+    type: tc.type,
+    inputs: tc.inputs,
+  }));
+
+  const combinedCases = [...formattedValidCases, ...formattedInvalidCases];
+
+  // Step 5: Generate CSV report
+  const inputKeys = validCases.length ? Object.keys(validCases[0].inputs) : [];
+  const header = ['Test Case ID', 'Type', ...inputKeys, 'Coverage (%)'];
+  const totalAll = Math.max(combinedCases.length, 1);
+
+  const rows = combinedCases.map((tc, idx) => [
+    tc.id,
+    tc.type,
+    ...inputKeys.map((k) => tc.inputs[k] || ''),
+    `${(((idx + 1) / totalAll) * 100).toFixed(2)}%`,
+  ]);
+
+  const csvReport = stringify([header, ...rows]);
+
+  return {
+    total: combinedCases.length,
+    validCount: validCases.length,
+    invalidCount: invalidCases.length,
+    combinedCases,
+    csvReport,
   };
+}
 
 module.exports = { generateCCTMTestCases };
-  

@@ -1,9 +1,9 @@
 // routes/cctmRoutes.js
 const express = require('express');
 const multer = require('multer');
-const { parseCCTMXML, mergeCCTMTree, generateTestCases } = require('../services/cctmService');
+const { generateCCTMTestCases } = require('../services/cctmService');
 // const { analyzeImpact } = require('../services/impactAnalyzer');
-
+const path = require('path');
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
 
@@ -39,13 +39,16 @@ router.post('/merge', upload.fields([{ name: 'file1' }, { name: 'file2' }]), asy
  * @route POST /api/cctm/generate
  * @desc Generate test cases from the merged tree
  */
-router.post('/generate', async (req, res) => {
+router.post('/generate', upload.single('xmlFile'), async (req, res) => {
   try {
-    const { mergedTree } = req.body;
-    const testCases = await generateTestCases(mergedTree);
-    res.json({ message: 'Test cases generated successfully', testCases });
+    if (!req.file) {
+      return res.status(400).json({ error: 'No XML file uploaded. Please provide a file with field name "xmlFile".' });
+    }
+    const xmlFilePath = req.file.path; // path ของไฟล์ที่เพิ่ง upload
+    const result = await generateCCTMTestCases(xmlFilePath);
+    res.json(result);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to generate test cases', details: error.message });
+    res.status(500).json({ error: error.message });
   }
 });
 
