@@ -1,77 +1,51 @@
 {
   "classifications": [
     {
-      "name": "Sex",
-      "classes": [
-        {
-          "name": "Male",
-          "type": "valid"
-        },
-        {
-          "name": "Female",
-          "type": "valid"
-        },
-        {
-          "name": "N/A",
-          "type": "invalid"
-        }
-      ]
-    },
-    {
-      "name": "Age",
+      "name": "GFR",
       "classes": [
         {
           "name": "<0",
           "type": "invalid"
         },
         {
-          "name": "1-18",
+          "name": "0-14",
           "type": "valid"
         },
         {
-          "name": "19-120",
+          "name": "15-29",
           "type": "valid"
         },
         {
-          "name": ">120",
+          "name": "30-59",
+          "type": "valid"
+        },
+        {
+          "name": "60-89",
+          "type": "valid"
+        },
+        {
+          "name": ">=90",
           "type": "invalid"
         }
       ]
     },
     {
-      "name": "Height",
+      "name": "UO",
       "classes": [
         {
           "name": "<0",
           "type": "invalid"
         },
         {
-          "name": "0-300",
+          "name": "0-29",
+          "type": "valid"
+        },
+        {
+          "name": "30-300",
           "type": "valid"
         },
         {
           "name": ">300",
-          "type": "invalid"
-        }
-      ]
-    },
-    {
-      "name": "SCr",
-      "classes": [
-        {
-          "name": "<0",
-          "type": "invalid"
-        },
-        {
-          "name": "0-0.9",
-          "type": "valid"
-        },
-        {
-          "name": "1.0-10.0",
-          "type": "valid"
-        },
-        {
-          "name": ">10",
           "type": "invalid"
         }
       ]
