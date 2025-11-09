@@ -2,10 +2,22 @@
 const express = require('express');
 const multer = require('multer');
 const { generateCCTMTestCases } = require('../services/cctmService');
+const authMiddleware = require('../middleware/auth.middleware');
 // const { analyzeImpact } = require('../services/impactAnalyzer');
 const path = require('path');
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
+
+// Optional authentication middleware - allows requests with or without token
+const optionalAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    // If token is provided, use auth middleware
+    return authMiddleware(req, res, next);
+  }
+  // If no token, continue without authentication
+  next();
+};
 
 /**
  * @route POST /api/cctm/upload
@@ -39,13 +51,17 @@ router.post('/merge', upload.fields([{ name: 'file1' }, { name: 'file2' }]), asy
  * @route POST /api/cctm/generate
  * @desc Generate test cases from the merged tree
  */
-router.post('/generate', upload.single('xmlFile'), async (req, res) => {
+router.post('/generate', optionalAuth, upload.single('xmlFile'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No XML file uploaded. Please provide a file with field name "xmlFile".' });
     }
     const xmlFilePath = req.file.path; // path ของไฟล์ที่เพิ่ง upload
-    const result = await generateCCTMTestCases(xmlFilePath);
+    
+    // Get userId from request if authenticated (optional for backward compatibility)
+    const userId = req.user?.id || null;
+    
+    const result = await generateCCTMTestCases(xmlFilePath, userId);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

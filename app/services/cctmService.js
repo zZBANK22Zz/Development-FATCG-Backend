@@ -3,6 +3,7 @@ const { parseXMLFile } = require('../utils/xmlParser');
 const { convertTreeToDataDictionary } = require('../utils/ecp/convertTreeToDataDictionary');
 const { generateValidCrossProductCasesFromJson, generateInvalidEcpCasesFromJson } = require('../utils/ecp/ecpCctmAdapter');
 const { stringify } = require('csv-stringify/sync');
+const CctmModel = require('../model/cctmModel');
 
 // Helper: ensure array
 const toArray = (maybeArr) =>
@@ -59,7 +60,7 @@ function extractUseCaseInfo(tree) {
   };
 }
 
-async function generateCCTMTestCases(xmlFilePath) {
+async function generateCCTMTestCases(xmlFilePath, userId = null) {
   // Step 1: Parse XML → Object tree
   const tree = await parseXMLFile(xmlFilePath);
 
@@ -105,7 +106,10 @@ async function generateCCTMTestCases(xmlFilePath) {
   const variables = transformTreeToVariables(tree);
   const useCaseInfo = extractUseCaseInfo(tree);
 
-  return {
+  // Extract system name from useCaseInfo
+  const systemName = useCaseInfo.name || 'Unknown System';
+
+  const result = {
     total: combinedCases.length,
     validCount: validCases.length,
     invalidCount: invalidCases.length,
@@ -115,6 +119,24 @@ async function generateCCTMTestCases(xmlFilePath) {
     variables,
     useCaseInfo,
   };
+
+  // Save CCTM test cases to database if userId is provided
+  // Store as 1 system = 1 row with all test cases in test_cases column
+  if (userId && combinedCases.length > 0) {
+    try {
+      await CctmModel.saveCctmSystem(userId, systemName, combinedCases, {
+        variables,
+        useCaseInfo,
+        csvReport
+      });
+      console.log(`CCTM system "${systemName}" saved for user ${userId}: ${combinedCases.length} test cases`);
+    } catch (dbError) {
+      console.error('Error saving CCTM system to database:', dbError);
+      // Don't fail the request if database save fails, just log the error
+    }
+  }
+
+  return result;
 }
 
 module.exports = { generateCCTMTestCases };
