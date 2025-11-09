@@ -13,7 +13,10 @@ async function generateFTATests(req, res) {
       return res.status(400).json({ error: 'No XML provided (file or xml body).' });
     }
 
-    const result = await handleFtaXml(xmlContent);
+    // Get userId from request if authenticated (optional for backward compatibility)
+    const userId = req.user?.id || null;
+
+    const result = await handleFtaXml(xmlContent, userId);
     return res.json(result);
   } catch (err) {
     console.error('FTA generate error:', err);

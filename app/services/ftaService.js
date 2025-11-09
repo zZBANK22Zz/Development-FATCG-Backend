@@ -1,5 +1,6 @@
 const xml2js = require('xml2js');
 const { v4: uuidv4 } = require('uuid');
+const FtaModel = require('../model/ftaModel');
 
 /**
  * handleFtaXml(xmlString)
@@ -16,7 +17,7 @@ const { v4: uuidv4 } = require('uuid');
  * }
  */
 
-async function handleFtaXml(xml) {
+async function handleFtaXml(xml, userId = null) {
   const parser = new xml2js.Parser({ explicitArray: false, trim: true });
   const parsed = await parser.parseStringPromise(xml);
 
@@ -53,10 +54,24 @@ async function handleFtaXml(xml) {
     return id;
   };
 
+  // Extract pattern type and system name from XML
+  let faultPatternType = null;
+  let systemName = null;
+  let testCaseName = null;
+
   // For each pattern, build sub-tree and testcases
   for (const p of extractedPatterns) {
     const type = (p.$ && p.$.type) || p.type || (p['$'] && p['$'].type) || p['@'] && p['@'].type || p['pattern'] && p['pattern'].$ && p['pattern'].$.type || (p['$'] && p['$'].type) || (p['patternType']);
-    const topName = (p.$ && p.$.name) || p.name || (p.topEvent && p.topEvent.$ && p.topEvent.$.name) || (p.topEvent && p.topEvent.label) || `TopEvent-${Math.random().toString(36).slice(2,6)}`;
+    faultPatternType = type || 'unknown';
+    
+    // Extract system name from pattern name attribute
+    const patternName = (p.$ && p.$.name) || p.name || 'Unknown System';
+    systemName = patternName;
+    
+    // Extract test case name from topEvent
+    const topName = (p.topEvent && p.topEvent.$ && p.topEvent.$.name) || (p.topEvent && p.topEvent.label) || patternName;
+    testCaseName = topName || `FTA_${Date.now()}`;
+    
     const topId = addNode(topName, 'top');
 
     if (type === 'invalid-range' || (p.$ && p.$.type === 'invalid-range') || p.type === 'invalid-range') {
@@ -193,11 +208,25 @@ async function handleFtaXml(xml) {
   // Map edges to unique node ids (by label) — edges already use generated ids, but duplicates may exist.
   // For simplicity, keep edges as-is. Frontend can lay out graph.
 
-  return {
+  const result = {
     total: testCases.length,
     testCases,
     faultTree: { nodes: finalNodes, edges }
   };
+
+  // Save FTA data to database if userId is provided
+  if (userId) {
+    try {
+      // Pass result object directly as JSONB (PostgreSQL will handle conversion)
+      await FtaModel.saveFta(userId, result, faultPatternType, systemName, testCaseName);
+      console.log(`FTA data saved for user ${userId}: ${testCaseName}`);
+    } catch (dbError) {
+      console.error('Error saving FTA data to database:', dbError);
+      // Don't fail the request if database save fails, just log the error
+    }
+  }
+
+  return result;
 }
 
 module.exports = { handleFtaXml };
