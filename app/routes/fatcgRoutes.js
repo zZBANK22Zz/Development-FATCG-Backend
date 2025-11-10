@@ -1,6 +1,7 @@
 const express = require("express");
 const upload = require("../middleware/upload.middleware");
-const { generateTestCases } = require("../controller/fatcgController");
+const authMiddleware = require("../middleware/auth.middleware");
+const { generateTestCases, getTestCasesBySystemName } = require("../controller/fatcgController");
 
 const router = express.Router();
 
@@ -13,5 +14,8 @@ router.post(
   ]),
   generateTestCases
 );
+
+// Get combined test cases by system name (requires authentication)
+router.get("/search", authMiddleware, getTestCasesBySystemName);
 
 module.exports = router;

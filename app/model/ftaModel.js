@@ -53,6 +53,15 @@ const FtaModel = {
         return result.rows[0];
     },
 
+    // Get FTA data by user_id and system_name
+    getFtaBySystemName: async (userId, systemName) => {
+        const result = await pool.query(
+            'SELECT * FROM fta_testcase WHERE user_id = $1 AND system_name = $2 ORDER BY created_at DESC',
+            [userId, systemName]
+        );
+        return result.rows;
+    },
+
     // Delete FTA data by id
     deleteFta: async (id, userId) => {
         const result = await pool.query(
