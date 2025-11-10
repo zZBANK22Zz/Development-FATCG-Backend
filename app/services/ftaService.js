@@ -103,32 +103,94 @@ async function handleFtaXml(xml, userId = null) {
         }
       }
     } else if (type === 'invalid-mapping' || p.type === 'invalid-mapping' || (p.mappings)) {
-      // mapping entries -> each mapping becomes an intermediate event path
+      // For invalid-mapping, read from hierarchical structure: topEvent -> intermediateEvent -> basicEvent
+      // This generates one test case per basic event
+      
+      // First, read mappings section for data definition (optional, for backward compatibility)
       const mappings = p.mappings && p.mappings.mapping ? (Array.isArray(p.mappings.mapping) ? p.mappings.mapping : [p.mappings.mapping]) : (p.mapping ? (Array.isArray(p.mapping) ? p.mapping : [p.mapping]) : []);
-      for (const m of mappings) {
-        const desc = m.description || (m.$ && m.$.description) || 'Invalid Mapping';
-        const mid = addNode(desc, 'intermediate');
-        edges.push({ from: mid, to: topId });
-        // conditions/conds -> basic events
-        const conds = m.conditions && m.conditions.cond ? (Array.isArray(m.conditions.cond) ? m.conditions.cond : [m.conditions.cond]) : (m.cond ? (Array.isArray(m.cond) ? m.cond : [m.cond]) : []);
-        const triggers = [];
-        const inputs = {};
-        for (const c of conds) {
-          const varName = c.$?.var || c.var;
-          const val = (typeof c === 'string') ? c : (c._ || c);
-          const label = `${varName} = ${val}`.trim();
-          const bid = addNode(label, 'basic');
-          edges.push({ from: bid, to: mid });
-          triggers.push(bid);
-          inputs[varName] = val;
+      
+      // Read hierarchical structure from topEvent
+      if (p.topEvent) {
+        const topEvent = p.topEvent;
+        const topEventName = topEvent.$?.name || topEvent.name || topName || 'TopEvent';
+        
+        // Get intermediate events from topEvent
+        const intermediateEvents = topEvent.intermediateEvent ? 
+          (Array.isArray(topEvent.intermediateEvent) ? topEvent.intermediateEvent : [topEvent.intermediateEvent]) : [];
+        
+        // Process each intermediate event
+        for (const ie of intermediateEvents) {
+          const ieName = ie.$?.name || ie.name || 'Intermediate Event';
+          const ieId = addNode(ieName, 'intermediate');
+          edges.push({ from: ieId, to: topId });
+          
+          // Get basic events for this intermediate event
+          const basicEvents = ie.basicEvent ? 
+            (Array.isArray(ie.basicEvent) ? ie.basicEvent : [ie.basicEvent]) : [];
+          
+          // Generate one test case per basic event
+          for (const be of basicEvents) {
+            const beName = be.$?.name || be.name || be._ || String(be);
+            const beId = addNode(beName, 'basic');
+            edges.push({ from: beId, to: ieId });
+            
+            // Parse inputs from basic event name (e.g., "GFR >= 90 and UO < 30")
+            // Try to extract variable-value pairs from the basic event description
+            const inputs = {};
+            // Simple parsing: look for patterns like "VAR = VALUE" or "VAR VALUE"
+            const parts = beName.split(/and|&/i).map(p => p.trim());
+            for (const part of parts) {
+              // Try to match patterns like "GFR >= 90", "GFR = 30-59", "UO < 30"
+              const match = part.match(/(\w+)\s*(>=|<=|>|<|=)\s*(.+)/);
+              if (match) {
+                const [, varName, operator, value] = match;
+                inputs[varName] = `${operator}${value}`.trim();
+              } else {
+                // Fallback: try simple "VAR VALUE" pattern
+                const simpleMatch = part.match(/(\w+)\s+(.+)/);
+                if (simpleMatch) {
+                  const [, varName, value] = simpleMatch;
+                  inputs[varName] = value.trim();
+                }
+              }
+            }
+            
+            testCases.push({
+              id: `FCT-${testCases.length + 1}`,
+              type: 'fault',
+              description: `${ieName}: ${beName}`,
+              inputs,
+              triggers: [beId]
+            });
+          }
         }
-        testCases.push({
-          id: `FCT-${testCases.length + 1}`,
-          type: 'fault',
-          description: `Mapping: ${desc}`,
-          inputs,
-          triggers
-        });
+      } else {
+        // Fallback: if no hierarchical structure, use mappings section (backward compatibility)
+        for (const m of mappings) {
+          const desc = m.description || (m.$ && m.$.description) || 'Invalid Mapping';
+          const mid = addNode(desc, 'intermediate');
+          edges.push({ from: mid, to: topId });
+          // conditions/conds -> basic events
+          const conds = m.conditions && m.conditions.cond ? (Array.isArray(m.conditions.cond) ? m.conditions.cond : [m.conditions.cond]) : (m.cond ? (Array.isArray(m.cond) ? m.cond : [m.cond]) : []);
+          const triggers = [];
+          const inputs = {};
+          for (const c of conds) {
+            const varName = c.$?.var || c.var;
+            const val = (typeof c === 'string') ? c : (c._ || c);
+            const label = `${varName} = ${val}`.trim();
+            const bid = addNode(label, 'basic');
+            edges.push({ from: bid, to: mid });
+            triggers.push(bid);
+            inputs[varName] = val;
+          }
+          testCases.push({
+            id: `FCT-${testCases.length + 1}`,
+            type: 'fault',
+            description: `Mapping: ${desc}`,
+            inputs,
+            triggers
+          });
+        }
       }
     } else if (type === 'safety-property' || p.type === 'safety-property' || p.property || p.properties) {
       // safety properties: each property creates an intermediate + basic triggers
