@@ -75,31 +75,76 @@ async function handleFtaXml(xml, userId = null) {
     const topId = addNode(topName, 'top');
 
     if (type === 'invalid-range' || (p.$ && p.$.type === 'invalid-range') || p.type === 'invalid-range') {
-      // parse variables -> each invalid range becomes basic event
-      const vars = p.variables && p.variables.var ? (Array.isArray(p.variables.var) ? p.variables.var : [p.variables.var]) : [];
-      for (const v of vars) {
-        const varName = v.$?.name || v.name;
-        // invalid entries may be child nodes <invalid>
-        const invalids = [];
-        if (v.invalid) {
-          if (Array.isArray(v.invalid)) invalids.push(...v.invalid);
-          else invalids.push(v.invalid);
+      // Check if hierarchical structure exists (topEvent -> intermediateEvent -> basicEvent)
+      if (p.topEvent && p.topEvent.intermediateEvent) {
+        // Process hierarchical structure with intermediate events
+        const topEvent = p.topEvent;
+        const intermediateEvents = topEvent.intermediateEvent ? 
+          (Array.isArray(topEvent.intermediateEvent) ? topEvent.intermediateEvent : [topEvent.intermediateEvent]) : [];
+        
+        // Process each intermediate event
+        for (const ie of intermediateEvents) {
+          const ieName = ie.$?.name || ie.name || 'Intermediate Event';
+          const ieId = addNode(ieName, 'intermediate');
+          edges.push({ from: ieId, to: topId });
+          
+          // Get basic events for this intermediate event
+          const basicEvents = ie.basicEvent ? 
+            (Array.isArray(ie.basicEvent) ? ie.basicEvent : [ie.basicEvent]) : [];
+          
+          // Generate one test case per basic event
+          for (const be of basicEvents) {
+            const beName = be.$?.name || be.name || be._ || String(be);
+            const beId = addNode(beName, 'basic');
+            edges.push({ from: beId, to: ieId });
+            
+            // Parse inputs from basic event name (e.g., "Age = <0" or "Age = >120")
+            const inputs = {};
+            const match = beName.match(/(\w+)\s*=\s*(.+)/);
+            if (match) {
+              const [, varName, value] = match;
+              inputs[varName] = value.trim();
+            } else {
+              // Fallback: use the whole name as a single input
+              inputs[beName] = '';
+            }
+            
+            testCases.push({
+              id: `FCT-${testCases.length + 1}`,
+              type: 'fault',
+              description: `${ieName}: ${beName}`,
+              inputs,
+              triggers: [beId]
+            });
+          }
         }
-        // create a basic event node for each invalid token
-        for (const inv of invalids) {
-          const label = `${varName} = ${inv}`.trim();
-          const nid = addNode(label, 'basic');
-          edges.push({ from: nid, to: topId }); // basic -> top
-          // Generate test case that sets this var to the invalid value, others to "nominal"
-          const inputs = {};
-          inputs[varName] = inv;
-          testCases.push({
-            id: `FCT-${testCases.length + 1}`,
-            type: 'fault',
-            description: `Trigger ${label}`,
-            inputs,
-            triggers: [nid]
-          });
+      } else {
+        // Original format: parse variables -> each invalid range becomes basic event
+        const vars = p.variables && p.variables.var ? (Array.isArray(p.variables.var) ? p.variables.var : [p.variables.var]) : [];
+        for (const v of vars) {
+          const varName = v.$?.name || v.name;
+          // invalid entries may be child nodes <invalid>
+          const invalids = [];
+          if (v.invalid) {
+            if (Array.isArray(v.invalid)) invalids.push(...v.invalid);
+            else invalids.push(v.invalid);
+          }
+          // create a basic event node for each invalid token
+          for (const inv of invalids) {
+            const label = `${varName} = ${inv}`.trim();
+            const nid = addNode(label, 'basic');
+            edges.push({ from: nid, to: topId }); // basic -> top
+            // Generate test case that sets this var to the invalid value, others to "nominal"
+            const inputs = {};
+            inputs[varName] = inv;
+            testCases.push({
+              id: `FCT-${testCases.length + 1}`,
+              type: 'fault',
+              description: `Trigger ${label}`,
+              inputs,
+              triggers: [nid]
+            });
+          }
         }
       }
     } else if (type === 'invalid-mapping' || p.type === 'invalid-mapping' || (p.mappings)) {
@@ -224,10 +269,14 @@ async function handleFtaXml(xml, userId = null) {
             const beId = addNode(beName, 'basic');
             edges.push({ from: beId, to: ieId });
             
-            // Parse inputs from basic event name (e.g., "GFR >= 90 and UO < 30")
-            // Try to extract variable-value pairs from the basic event description
+            // For safety-property, basic events are descriptions, not condition expressions
+            // Try to parse inputs from basic event name if it contains condition patterns
+            // Otherwise, use empty inputs (basic event name is just a description)
             const inputs = {};
-            // Simple parsing: look for patterns like "VAR = VALUE" or "VAR VALUE"
+            let hasParsedInputs = false;
+            
+            // Try parsing only if the name looks like a condition expression
+            // Look for patterns like "VAR = VALUE", "VAR >= VALUE", etc.
             const parts = beName.split(/and|&/i).map(p => p.trim());
             for (const part of parts) {
               // Try to match patterns like "GFR >= 90", "GFR = 30-59", "UO < 30"
@@ -235,15 +284,23 @@ async function handleFtaXml(xml, userId = null) {
               if (match) {
                 const [, varName, operator, value] = match;
                 inputs[varName] = `${operator}${value}`.trim();
+                hasParsedInputs = true;
               } else {
-                // Fallback: try simple "VAR VALUE" pattern
+                // Fallback: try simple "VAR VALUE" pattern (only if it looks like a condition)
                 const simpleMatch = part.match(/(\w+)\s+(.+)/);
                 if (simpleMatch) {
                   const [, varName, value] = simpleMatch;
-                  inputs[varName] = value.trim();
+                  // Only add if value looks like a number or condition value
+                  if (/[\d<>=]/.test(value)) {
+                    inputs[varName] = value.trim();
+                    hasParsedInputs = true;
+                  }
                 }
               }
             }
+            
+            // If no inputs were parsed, leave inputs empty
+            // The description field already contains the basic event name
             
             testCases.push({
               id: `FCT-${testCases.length + 1}`,
