@@ -54,6 +54,54 @@ async function handleFtaXml(xml, userId = null) {
     return id;
   };
 
+  // Utility: parse basic event from XML (supports both new format and legacy format)
+  // New format: <basicEvent id="101" min="1" max="2"/> (Integer) or <basicEvent id="201" value="Regular"/> (String)
+  // Legacy format: <basicEvent name="< 30 km/h"/>
+  const parseBasicEvent = (be) => {
+    const attrs = be.$ || {};
+    const beId = attrs.id || null;
+    const min = attrs.min !== undefined && attrs.min !== null ? String(attrs.min).trim() : null;
+    const max = attrs.max !== undefined && attrs.max !== null ? String(attrs.max).trim() : null;
+    const value = attrs.value !== undefined && attrs.value !== null ? String(attrs.value).trim() : null;
+    const name = attrs.name || be.name || be._ || String(be);
+    
+    // Check if it's new format (has id and either (min+max) or value)
+    if (beId && (min !== null || max !== null || value !== null)) {
+      // New format
+      if (min !== null && max !== null && min !== '' && max !== '') {
+        // Integer format: id, min, max
+        return {
+          format: 'new',
+          type: 'Integer',
+          id: beId,
+          min: min,
+          max: max,
+          label: `[${beId}] Range: ${min}-${max}`,
+          inputs: { id: beId, min: min, max: max }
+        };
+      } else if (value !== null && value !== '') {
+        // String format: id, value
+        return {
+          format: 'new',
+          type: 'String',
+          id: beId,
+          value: value,
+          label: `[${beId}] Value: ${value}`,
+          inputs: { id: beId, value: value }
+        };
+      }
+    }
+    
+    // Legacy format: use name attribute
+    return {
+      format: 'legacy',
+      type: 'String',
+      name: name,
+      label: name,
+      inputs: { name: name }
+    };
+  };
+
   // Extract pattern type and system name from XML
   let faultPatternType = null;
   let systemName = null;
@@ -94,27 +142,33 @@ async function handleFtaXml(xml, userId = null) {
           
           // Generate one test case per basic event
           for (const be of basicEvents) {
-            const beName = be.$?.name || be.name || be._ || String(be);
-            const beId = addNode(beName, 'basic');
-            edges.push({ from: beId, to: ieId });
+            const parsedBe = parseBasicEvent(be);
+            const beNodeId = addNode(parsedBe.label, 'basic');
+            edges.push({ from: beNodeId, to: ieId });
             
-            // Parse inputs from basic event name (e.g., "Age = <0" or "Age = >120")
-            const inputs = {};
-            const match = beName.match(/(\w+)\s*=\s*(.+)/);
-            if (match) {
-              const [, varName, value] = match;
-              inputs[varName] = value.trim();
+            // Use parsed inputs from new format or parse from legacy format
+            let inputs = {};
+            if (parsedBe.format === 'new') {
+              // New format: use parsed inputs directly
+              inputs = parsedBe.inputs;
             } else {
-              // Fallback: use the whole name as a single input
-              inputs[beName] = '';
+              // Legacy format: parse inputs from basic event name (e.g., "Age = <0" or "Age = >120")
+              const match = parsedBe.name.match(/(\w+)\s*=\s*(.+)/);
+              if (match) {
+                const [, varName, value] = match;
+                inputs[varName] = value.trim();
+              } else {
+                // Fallback: use the whole name as a single input
+                inputs[parsedBe.name] = '';
+              }
             }
             
             testCases.push({
               id: `FCT-${testCases.length + 1}`,
               type: 'fault',
-              description: `${ieName}: ${beName}`,
+              description: `${ieName}: ${parsedBe.label}`,
               inputs,
-              triggers: [beId]
+              triggers: [beNodeId]
             });
           }
         }
@@ -148,54 +202,210 @@ async function handleFtaXml(xml, userId = null) {
         }
       }
     } else if (type === 'invalid-mapping' || p.type === 'invalid-mapping' || (p.mappings)) {
-      // For invalid-mapping, read from hierarchical structure: topEvent -> intermediateEvent -> basicEvent
-      // This generates one test case per basic event
+      // For invalid-mapping, use conditions from mappings section to create intermediate events
+      // Each condition maps to a stage (RISK, INJURY, FAILURE, etc.), which becomes an intermediate event
+      // Basic events come from topEvent section and are mapped to appropriate intermediate events
       
-      // First, read mappings section for data definition (optional, for backward compatibility)
+      // Read mappings section to extract conditions and their stages
       const mappings = p.mappings && p.mappings.mapping ? (Array.isArray(p.mappings.mapping) ? p.mappings.mapping : [p.mappings.mapping]) : (p.mapping ? (Array.isArray(p.mapping) ? p.mapping : [p.mapping]) : []);
       
-      // Read hierarchical structure from topEvent
+      // Map to store stage -> intermediate event ID
+      const stageToIntermediateId = new Map();
+      
+      // First pass: Create intermediate events from conditions in mappings section
+      // Each condition has a value (stage) that becomes an intermediate event
+      for (const m of mappings) {
+        const conds = m.conditions && m.conditions.cond ? (Array.isArray(m.conditions.cond) ? m.conditions.cond : [m.conditions.cond]) : (m.cond ? (Array.isArray(m.cond) ? m.cond : [m.cond]) : []);
+        
+        for (const c of conds) {
+          const condVar = c.$?.var || c.var || '';
+          const condValue = (typeof c === 'string') ? c : (c._ || c || '');
+          
+          // Extract stage from condition value (e.g., "RISK", "INJURY", "FAILURE")
+          // The stage is the value part of the condition
+          const stage = condValue.trim();
+          
+          if (stage && !stageToIntermediateId.has(stage)) {
+            // Create intermediate event for this stage
+            const ieName = `Incorrect ${stage} stage`;
+            const ieId = addNode(ieName, 'intermediate');
+            edges.push({ from: ieId, to: topId });
+            stageToIntermediateId.set(stage, ieId);
+          }
+        }
+      }
+      
+      // Second pass: Process basic events from topEvent section and map them to intermediate events
       if (p.topEvent) {
         const topEvent = p.topEvent;
         const topEventName = topEvent.$?.name || topEvent.name || topName || 'TopEvent';
         
-        // Get intermediate events from topEvent
+        // Get intermediate events from topEvent (these are the groups)
         const intermediateEvents = topEvent.intermediateEvent ? 
           (Array.isArray(topEvent.intermediateEvent) ? topEvent.intermediateEvent : [topEvent.intermediateEvent]) : [];
         
-        // Process each intermediate event
+        // Process each intermediate event group from topEvent
         for (const ie of intermediateEvents) {
-          const ieName = ie.$?.name || ie.name || 'Intermediate Event';
-          const ieId = addNode(ieName, 'intermediate');
-          edges.push({ from: ieId, to: topId });
+          const ieGroupName = ie.$?.name || ie.name || 'Intermediate Event';
           
-          // Get basic events for this intermediate event
+          // Get basic events for this intermediate event group
           const basicEvents = ie.basicEvent ? 
             (Array.isArray(ie.basicEvent) ? ie.basicEvent : [ie.basicEvent]) : [];
           
-          // Generate one test case per basic event
+          // For each basic event, try to determine which stage it belongs to
+          // by matching against conditions in mappings
           for (const be of basicEvents) {
-            const beName = be.$?.name || be.name || be._ || String(be);
-            const beId = addNode(beName, 'basic');
-            edges.push({ from: beId, to: ieId });
+            const parsedBe = parseBasicEvent(be);
+            const beId = addNode(parsedBe.label, 'basic');
+            const beName = parsedBe.label; // Use parsed label for matching
             
-            // Parse inputs from basic event name (e.g., "GFR >= 90 and UO < 30")
-            // Try to extract variable-value pairs from the basic event description
-            const inputs = {};
-            // Simple parsing: look for patterns like "VAR = VALUE" or "VAR VALUE"
-            const parts = beName.split(/and|&/i).map(p => p.trim());
-            for (const part of parts) {
-              // Try to match patterns like "GFR >= 90", "GFR = 30-59", "UO < 30"
-              const match = part.match(/(\w+)\s*(>=|<=|>|<|=)\s*(.+)/);
-              if (match) {
-                const [, varName, operator, value] = match;
-                inputs[varName] = `${operator}${value}`.trim();
-              } else {
-                // Fallback: try simple "VAR VALUE" pattern
-                const simpleMatch = part.match(/(\w+)\s+(.+)/);
-                if (simpleMatch) {
-                  const [, varName, value] = simpleMatch;
-                  inputs[varName] = value.trim();
+            // Try to find matching stage by checking conditions
+            // Match basic events to stages based on variable ranges (generic, works with any variable name)
+            let matchedStage = null;
+            let matchedIeId = null;
+            
+            // Extract variable range from text (generic function, works with any variable name)
+            // Examples: "GFR ≥ 90", "GFR 60-89", "BP = 120-140", "Temperature < 0"
+            const extractVariableRange = (text) => {
+              // Remove curly braces and other formatting
+              const cleanText = text.replace(/[{}]/g, '').trim();
+              
+              // Match patterns: VAR >= 90, VAR ≥ 90, VAR 60-89, VAR = 15–29, VAR < 15
+              // Generic pattern: any variable name followed by operator and number(s)
+              // First try with operator: VAR >= 90, VAR = 60-89
+              let rangeMatch = cleanText.match(/(\w+)\s*(>=|≥|>|<=|≤|<|=)\s*(\d+)(?:\s*[-–]\s*(\d+))?/i);
+              if (rangeMatch) {
+                const varName = rangeMatch[1];
+                const operator = rangeMatch[2] || '=';
+                const start = parseInt(rangeMatch[3]);
+                const end = rangeMatch[4] ? parseInt(rangeMatch[4]) : null;
+                return { varName, operator, start, end };
+              }
+              // Try without operator: VAR 60–89
+              rangeMatch = cleanText.match(/(\w+)\s+(\d+)(?:\s*[-–]\s*(\d+))?/i);
+              if (rangeMatch) {
+                const varName = rangeMatch[1];
+                const start = parseInt(rangeMatch[2]);
+                const end = rangeMatch[3] ? parseInt(rangeMatch[3]) : null;
+                return { varName, operator: '=', start, end };
+              }
+              return null;
+            };
+            
+            const beRange = extractVariableRange(beName);
+            
+            // Check each mapping to find which stage this basic event belongs to
+            // Priority: match by variable range first, then by stage name
+            for (const m of mappings) {
+              const conds = m.conditions && m.conditions.cond ? (Array.isArray(m.conditions.cond) ? m.conditions.cond : [m.conditions.cond]) : (m.cond ? (Array.isArray(m.cond) ? m.cond : [m.cond]) : []);
+              
+              for (const c of conds) {
+                const condVar = c.$?.var || c.var || '';
+                const condValue = (typeof c === 'string') ? c : (c._ || c || '');
+                const stage = condValue.trim();
+                
+                // Extract variable range from condition variable
+                const condRange = extractVariableRange(condVar);
+                
+                // Match if variable ranges overlap or match (and same variable name)
+                if (beRange && condRange && beRange.varName && condRange.varName) {
+                  // Check if same variable name (case-insensitive)
+                  const sameVariable = beRange.varName.toLowerCase() === condRange.varName.toLowerCase();
+                  
+                  if (sameVariable) {
+                    let matches = false;
+                    
+                    // Check if ranges match based on values
+                    if (beRange.start !== null && condRange.start !== null) {
+                      // Case 1: Both are ranges (e.g., "VAR 60-89" vs "VAR = 60–89")
+                      if (beRange.end && condRange.end) {
+                        // Check if ranges overlap or match exactly
+                        matches = (beRange.start === condRange.start && beRange.end === condRange.end) ||
+                                  (beRange.start <= condRange.end && beRange.end >= condRange.start);
+                      }
+                      // Case 2: Both are single values with >= operator (e.g., "VAR ≥ 90" vs "VAR ≥ 90")
+                      else if (!beRange.end && !condRange.end) {
+                        // Match if same value and both use >= or ≥
+                        if ((beRange.operator.match(/>=|≥/) && condRange.operator.match(/>=|≥/)) ||
+                            (beRange.operator === '=' && condRange.operator === '=')) {
+                          matches = (beRange.start === condRange.start);
+                        }
+                      }
+                      // Case 3: be is range, cond is single value
+                      else if (beRange.end && !condRange.end) {
+                        // Check if cond value is within be range
+                        matches = (condRange.start >= beRange.start && condRange.start <= beRange.end);
+                      }
+                      // Case 4: be is single value with >=, cond is range
+                      else if (!beRange.end && condRange.end) {
+                        // For >= operator, check if be start is within cond range
+                        if (beRange.operator.match(/>=|≥/)) {
+                          matches = (beRange.start >= condRange.start && beRange.start <= condRange.end);
+                        }
+                      }
+                    }
+                    
+                    if (matches) {
+                      matchedStage = stage;
+                      matchedIeId = stageToIntermediateId.get(stage);
+                      break;
+                    }
+                  }
+                } else {
+                  // Fallback: try simple string matching if range extraction failed
+                  const beMatches = beName.toLowerCase();
+                  const condMatches = condVar.toLowerCase();
+                  // Extract variable name from condition (before operator)
+                  const varName = condMatches.split(/[<>=≥≤]/)[0]?.trim() || '';
+                  if (varName && beMatches.includes(varName.toLowerCase())) {
+                    matchedStage = stage;
+                    matchedIeId = stageToIntermediateId.get(stage);
+                    break;
+                  }
+                }
+              }
+              if (matchedStage) break;
+            }
+            
+            // If no match found, use the first intermediate event from topEvent structure
+            // Or create a default intermediate event
+            if (!matchedIeId) {
+              // Use the intermediate event group name from topEvent as fallback
+              if (!stageToIntermediateId.has(ieGroupName)) {
+                const fallbackIeId = addNode(ieGroupName, 'intermediate');
+                edges.push({ from: fallbackIeId, to: topId });
+                stageToIntermediateId.set(ieGroupName, fallbackIeId);
+              }
+              matchedIeId = stageToIntermediateId.get(ieGroupName);
+            }
+            
+            // Connect basic event to intermediate event
+            if (matchedIeId) {
+              edges.push({ from: beId, to: matchedIeId });
+            } else {
+              // Last resort: connect to top event
+              edges.push({ from: beId, to: topId });
+            }
+            
+            // Parse inputs from basic event (new format or legacy format)
+            let inputs = {};
+            if (parsedBe.format === 'new') {
+              // New format: use parsed inputs directly
+              inputs = parsedBe.inputs;
+            } else {
+              // Legacy format: parse inputs from basic event name
+              const parts = beName.split(/and|&/i).map(p => p.trim());
+              for (const part of parts) {
+                const match = part.match(/(\w+)\s*(>=|<=|>|<|=)\s*(.+)/);
+                if (match) {
+                  const [, varName, operator, value] = match;
+                  inputs[varName] = `${operator}${value}`.trim();
+                } else {
+                  const simpleMatch = part.match(/(\w+)\s+(.+)/);
+                  if (simpleMatch) {
+                    const [, varName, value] = simpleMatch;
+                    inputs[varName] = value.trim();
+                  }
                 }
               }
             }
@@ -203,19 +413,18 @@ async function handleFtaXml(xml, userId = null) {
             testCases.push({
               id: `FCT-${testCases.length + 1}`,
               type: 'fault',
-              description: `${ieName}: ${beName}`,
+              description: `${matchedStage ? `Incorrect ${matchedStage} stage` : ieGroupName}: ${parsedBe.label}`,
               inputs,
               triggers: [beId]
             });
           }
         }
       } else {
-        // Fallback: if no hierarchical structure, use mappings section (backward compatibility)
+        // Fallback: if no topEvent, use mappings section directly (backward compatibility)
         for (const m of mappings) {
           const desc = m.description || (m.$ && m.$.description) || 'Invalid Mapping';
           const mid = addNode(desc, 'intermediate');
           edges.push({ from: mid, to: topId });
-          // conditions/conds -> basic events
           const conds = m.conditions && m.conditions.cond ? (Array.isArray(m.conditions.cond) ? m.conditions.cond : [m.conditions.cond]) : (m.cond ? (Array.isArray(m.cond) ? m.cond : [m.cond]) : []);
           const triggers = [];
           const inputs = {};
@@ -265,47 +474,59 @@ async function handleFtaXml(xml, userId = null) {
           
           // Generate one test case per basic event
           for (const be of basicEvents) {
-            const beName = be.$?.name || be.name || be._ || String(be);
-            const beId = addNode(beName, 'basic');
+            const parsedBe = parseBasicEvent(be);
+            const beId = addNode(parsedBe.label, 'basic');
             edges.push({ from: beId, to: ieId });
             
-            // For safety-property, basic events are descriptions, not condition expressions
-            // Try to parse inputs from basic event name if it contains condition patterns
-            // Otherwise, use empty inputs (basic event name is just a description)
-            const inputs = {};
-            let hasParsedInputs = false;
-            
-            // Try parsing only if the name looks like a condition expression
-            // Look for patterns like "VAR = VALUE", "VAR >= VALUE", etc.
-            const parts = beName.split(/and|&/i).map(p => p.trim());
-            for (const part of parts) {
-              // Try to match patterns like "GFR >= 90", "GFR = 30-59", "UO < 30"
-              const match = part.match(/(\w+)\s*(>=|<=|>|<|=)\s*(.+)/);
-              if (match) {
-                const [, varName, operator, value] = match;
-                inputs[varName] = `${operator}${value}`.trim();
-                hasParsedInputs = true;
-              } else {
-                // Fallback: try simple "VAR VALUE" pattern (only if it looks like a condition)
-                const simpleMatch = part.match(/(\w+)\s+(.+)/);
-                if (simpleMatch) {
-                  const [, varName, value] = simpleMatch;
-                  // Only add if value looks like a number or condition value
-                  if (/[\d<>=]/.test(value)) {
-                    inputs[varName] = value.trim();
-                    hasParsedInputs = true;
+            // Parse inputs from basic event (new format or legacy format)
+            let inputs = {};
+            if (parsedBe.format === 'new') {
+              // New format: use parsed inputs directly
+              inputs = parsedBe.inputs;
+            } else {
+              // Legacy format: For safety-property, basic events are descriptions
+              // Try to parse inputs from basic event name if it contains condition patterns
+              // Otherwise, use basic event name as input key with description as value
+              let hasParsedInputs = false;
+              
+              // Try parsing only if the name looks like a condition expression
+              // Look for patterns like "VAR = VALUE", "VAR >= VALUE", etc.
+              const parts = parsedBe.name.split(/and|&/i).map(p => p.trim());
+              for (const part of parts) {
+                // Try to match patterns like "GFR >= 90", "GFR = 30-59", "UO < 30"
+                const match = part.match(/(\w+)\s*(>=|<=|>|<|=)\s*(.+)/);
+                if (match) {
+                  const [, varName, operator, value] = match;
+                  inputs[varName] = `${operator}${value}`.trim();
+                  hasParsedInputs = true;
+                } else {
+                  // Fallback: try simple "VAR VALUE" pattern (only if it looks like a condition)
+                  const simpleMatch = part.match(/(\w+)\s+(.+)/);
+                  if (simpleMatch) {
+                    const [, varName, value] = simpleMatch;
+                    // Only add if value looks like a number or condition value
+                    if (/[\d<>=]/.test(value)) {
+                      inputs[varName] = value.trim();
+                      hasParsedInputs = true;
+                    }
                   }
                 }
               }
+              
+              // If no inputs were parsed, use basic event name as input key
+              // This ensures test cases have meaningful input data even for descriptive basic events
+              if (!hasParsedInputs) {
+                // Use a generic key like "event" or "condition" with the basic event name as value
+                // Or extract key components from the description
+                const eventKey = 'event';
+                inputs[eventKey] = parsedBe.name.trim();
+              }
             }
-            
-            // If no inputs were parsed, leave inputs empty
-            // The description field already contains the basic event name
             
             testCases.push({
               id: `FCT-${testCases.length + 1}`,
               type: 'fault',
-              description: `${ieName}: ${beName}`,
+              description: `${ieName}: ${parsedBe.label}`,
               inputs,
               triggers: [beId]
             });
@@ -356,14 +577,18 @@ async function handleFtaXml(xml, userId = null) {
         if (t.basicEvent) {
           const bes = Array.isArray(t.basicEvent) ? t.basicEvent : [t.basicEvent];
           for (const be of bes) {
-            const lbl = be.$?.label || be.label || be;
-            const bid = addNode(lbl, 'basic');
+            const parsedBe = parseBasicEvent(be);
+            const bid = addNode(parsedBe.label, 'basic');
             edges.push({ from: bid, to: tid });
+            
+            // Use parsed inputs from new format or empty for legacy
+            const inputs = parsedBe.format === 'new' ? parsedBe.inputs : {};
+            
             testCases.push({
               id: `FCT-${testCases.length + 1}`,
               type: 'fault',
-              description: `Basic ${lbl}`,
-              inputs: {},
+              description: `Basic ${parsedBe.label}`,
+              inputs,
               triggers: [bid]
             });
           }
