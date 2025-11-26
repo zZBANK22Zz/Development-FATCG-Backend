@@ -2,7 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const upload = multer({ dest: "uploads/" });
 const router = express.Router();
-const { generateFTATests } = require("../controller/ftaController");
+const { generateFTATests, saveInvalidMappingPattern } = require("../controller/ftaController");
 const authMiddleware = require("../middleware/auth.middleware");
 
 // Optional authentication middleware - allows requests with or without token
@@ -17,6 +17,9 @@ const optionalAuth = (req, res, next) => {
 };
 
 router.post("/generate", optionalAuth, upload.single("xmlFile"), generateFTATests);
+
+// Save Invalid Mapping Pattern - requires authentication
+router.post("/save-invalid-mapping", authMiddleware, saveInvalidMappingPattern);
 
 module.exports = router;
 
