@@ -1,6 +1,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { handleFtaXml } = require('../services/ftaService');
+const { generateCCTMTestCasesFromFormulas, generateFaultTreeTestCases } = require('../services/ftaCctmService');
 const FtaModel = require('../model/ftaModel');
 
 async function generateFTATests(req, res) {
@@ -72,4 +73,83 @@ async function saveInvalidMappingPattern(req, res) {
   }
 }
 
-module.exports = { generateFTATests, saveInvalidMappingPattern };
+/**
+ * Generate CCTM test cases from formulas and safety properties
+ * POST /api/fta/generate-cctm-test-cases
+ * Body: {
+ *   variables: Array,
+ *   functions: Array,
+ *   formulas: Array (optional),
+ *   invalidMappingTestCases: Array (optional)
+ * }
+ */
+async function generateCCTMTestCases(req, res) {
+  try {
+    const { variables, functions, formulas, invalidMappingTestCases } = req.body;
+
+    if (!variables || !Array.isArray(variables)) {
+      return res.status(400).json({ error: 'variables array is required' });
+    }
+
+    if (!functions || !Array.isArray(functions)) {
+      return res.status(400).json({ error: 'functions array is required' });
+    }
+
+    const testCases = generateCCTMTestCasesFromFormulas({
+      variables,
+      functions,
+      formulas: formulas || [],
+      invalidMappingTestCases: invalidMappingTestCases || []
+    });
+
+    return res.json({
+      success: true,
+      testCases
+    });
+  } catch (err) {
+    console.error('Generate CCTM test cases error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+/**
+ * Generate fault tree test cases (combining invalid range and invalid mapping)
+ * POST /api/fta/generate-fault-tree-test-cases
+ * Body: {
+ *   invalidRangeTestCases: Array,
+ *   invalidMappingTestCases: Array
+ * }
+ */
+async function generateFaultTreeTestCasesEndpoint(req, res) {
+  try {
+    const { invalidRangeTestCases, invalidMappingTestCases } = req.body;
+
+    if (!invalidRangeTestCases || !Array.isArray(invalidRangeTestCases)) {
+      return res.status(400).json({ error: 'invalidRangeTestCases array is required' });
+    }
+
+    if (!invalidMappingTestCases || !Array.isArray(invalidMappingTestCases)) {
+      return res.status(400).json({ error: 'invalidMappingTestCases array is required' });
+    }
+
+    const testCases = generateFaultTreeTestCases({
+      invalidRangeTestCases,
+      invalidMappingTestCases
+    });
+
+    return res.json({
+      success: true,
+      testCases
+    });
+  } catch (err) {
+    console.error('Generate fault tree test cases error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+module.exports = { 
+  generateFTATests, 
+  saveInvalidMappingPattern,
+  generateCCTMTestCases,
+  generateFaultTreeTestCasesEndpoint
+};

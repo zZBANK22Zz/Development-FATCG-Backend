@@ -2,7 +2,12 @@ const express = require("express");
 const multer = require("multer");
 const upload = multer({ dest: "uploads/" });
 const router = express.Router();
-const { generateFTATests, saveInvalidMappingPattern } = require("../controller/ftaController");
+const { 
+  generateFTATests, 
+  saveInvalidMappingPattern,
+  generateCCTMTestCases,
+  generateFaultTreeTestCasesEndpoint
+} = require("../controller/ftaController");
 const authMiddleware = require("../middleware/auth.middleware");
 
 // Optional authentication middleware - allows requests with or without token
@@ -20,6 +25,12 @@ router.post("/generate", optionalAuth, upload.single("xmlFile"), generateFTATest
 
 // Save Invalid Mapping Pattern - requires authentication
 router.post("/save-invalid-mapping", authMiddleware, saveInvalidMappingPattern);
+
+// Generate CCTM test cases - no authentication required (public API)
+router.post("/generate-cctm-test-cases", generateCCTMTestCases);
+
+// Generate fault tree test cases - no authentication required (public API)
+router.post("/generate-fault-tree-test-cases", generateFaultTreeTestCasesEndpoint);
 
 module.exports = router;
 
